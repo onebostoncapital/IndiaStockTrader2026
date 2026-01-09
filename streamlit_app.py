@@ -63,10 +63,9 @@ def calculate_master_signal(symbol):
         return score, live_price, pct_chg
     except: return 0, 0, 0
 
-# --- NEW MODULE: MARKET LEADERS (INDEPENDENT) ---
-@st.cache_data(ttl=600) # Only scans every 10 mins to save speed
+# --- MODULE 2: MARKET LEADERS (INDEPENDENT) ---
+@st.cache_data(ttl=600) # Only scans every 10 mins
 def fetch_market_movers():
-    # We scan a list of high-activity NSE stocks
     movers_list = ["RELIANCE.NS", "TCS.NS", "HDFCBANK.NS", "ICICIBANK.NS", "INFY.NS", "SBIN.NS", "BHARTIARTL.NS", "LICI.NS", "ITC.NS", "HINDALCO.NS", "TATAMOTORS.NS", "ZOMATO.NS", "JIOFIN.NS", "ADANIENT.NS", "PAYTM.NS", "RVNL.NS", "MAZDOCK.NS", "IREDA.NS", "BHEL.NS", "TATAELXSI.NS"]
     data = yf.download(movers_list, period="1d", progress=False)
     
@@ -83,19 +82,17 @@ def fetch_market_movers():
     
     return movers_df
 
-# --- UI DISPLAY ---
+# --- UI DISPLAY CONTAINERS ---
 st.title("💹 India Top 11 Master Terminal")
 header_placeholder = st.empty()
 
-# Layout: Main Strategy
-st.header("🚀 Module 1: Strategy Signals (Rule-Locked)")
+st.header("🚀 Module 1: Strategy Signals")
 table_placeholder = st.empty()
 
 st.divider()
 
-# Layout: New Market Leaders Module
 st.header("📊 Module 2: Market Pulse (Top Movers)")
-m1, m2, m3 = st.columns(3)
+movers_placeholder = st.empty() # THIS PREVENTS DUPLICATION
 
 # --- MAIN REFRESH LOOP ---
 while True:
@@ -107,7 +104,7 @@ while True:
         c3.subheader(stat)
         c4.subheader(f"⏱️ {t_rem}")
 
-    # Update Module 1 (Every 60s)
+    # Update Module 1 (Strategy) - Every 60 seconds
     if 'last_ref' not in st.session_state or time.time() - st.session_state.last_ref > 60:
         res = []
         for tick, name in STOCKS.items():
@@ -116,20 +113,28 @@ while True:
             res.append({"Script": name, "Price": pr, "Chg %": ch, "Power": "⭐"*sc, "Signal": sig})
         
         df1 = pd.DataFrame(res)
+        
+        # Row coloring logic
+        def style_rows(row):
+            color = 'background-color: rgba(0, 255, 0, 0.1);' if row['Chg %'] > 0 else 'background-color: rgba(255, 0, 0, 0.1);'
+            return [color] * len(row)
+
         with table_placeholder.container():
-            st.dataframe(df1.style.format({"Chg %": "{:.2f}%"}), use_container_width=True, hide_index=True)
+            st.dataframe(df1.style.apply(style_rows, axis=1).format({"Chg %": "{:.2f}%"}), use_container_width=True, hide_index=True)
         st.session_state.last_ref = time.time()
 
-    # Update Module 2 (Market Movers)
+    # Update Module 2 (Movers) - Only if not already displayed or every 10 mins
     movers = fetch_market_movers()
-    with m1:
-        st.subheader("🔥 Top 5 Trending (Vol)")
-        st.write(movers.head(5).index.tolist())
-    with m2:
-        st.subheader("📈 Top 5 Gainers")
-        st.write(movers.sort_values(by='Change %', ascending=False).head(5).index.tolist())
-    with m3:
-        st.subheader("📉 Top 5 Losers")
-        st.write(movers.sort_values(by='Change %', ascending=True).head(5).index.tolist())
+    with movers_placeholder.container():
+        m1, m2, m3 = st.columns(3)
+        with m1:
+            st.subheader("🔥 Top 5 Volume")
+            st.table(movers.head(5).index.tolist())
+        with m2:
+            st.subheader("📈 Top 5 Gainers")
+            st.table(movers.sort_values(by='Change %', ascending=False).head(5).index.tolist())
+        with m3:
+            st.subheader("📉 Top 5 Losers")
+            st.table(movers.sort_values(by='Change %', ascending=True).head(5).index.tolist())
     
     time.sleep(1)
