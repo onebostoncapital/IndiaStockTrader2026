@@ -52,7 +52,7 @@ def calculate_master_signal(symbol):
         
         score = 0
         cp = get_num(df['Close'])
-        # YOUR 9 RULES (LOCKED)
+        # RULES 1-9 (LOCKED)
         if 1 <= cp <= 300: score += 1
         if cp > get_num(df['Close'].ewm(span=200).mean()): score += 1
         if get_num(df['Low']) <= float(df['Low'].tail(20).min()): score += 1
@@ -63,36 +63,38 @@ def calculate_master_signal(symbol):
         return score, live_price, pct_chg
     except: return 0, 0, 0
 
-# --- MODULE 2: MARKET LEADERS (INDEPENDENT) ---
-@st.cache_data(ttl=600) # Only scans every 10 mins
+# --- MODULE 2: MARKET PULSE (INDEPENDENT DATA) ---
+@st.cache_data(ttl=300) 
 def fetch_market_movers():
+    # Top 20 High-Activity Scripts
     movers_list = ["RELIANCE.NS", "TCS.NS", "HDFCBANK.NS", "ICICIBANK.NS", "INFY.NS", "SBIN.NS", "BHARTIARTL.NS", "LICI.NS", "ITC.NS", "HINDALCO.NS", "TATAMOTORS.NS", "ZOMATO.NS", "JIOFIN.NS", "ADANIENT.NS", "PAYTM.NS", "RVNL.NS", "MAZDOCK.NS", "IREDA.NS", "BHEL.NS", "TATAELXSI.NS"]
     data = yf.download(movers_list, period="1d", progress=False)
     
+    # Get current price and yesterday's close for % calculation
     close = data['Close'].iloc[-1]
-    open_p = data['Open'].iloc[-1]
+    # For a 1-day download, we use the first row of the 'Open' column as a proxy for baseline if 1d data is thin
+    baseline = data['Open'].iloc[0] 
     vol = data['Volume'].iloc[-1]
-    pct = ((close - open_p) / open_p) * 100
+    pct = ((close - baseline) / baseline) * 100
     
-    movers_df = pd.DataFrame({
-        'Price': close,
-        'Change %': pct,
+    df = pd.DataFrame({
+        'Price': close.round(2),
+        'Chg%': pct.round(2),
         'Volume': vol
-    }).sort_values(by='Volume', ascending=False)
-    
-    return movers_df
+    })
+    return df
 
-# --- UI DISPLAY CONTAINERS ---
+# --- UI DISPLAY ---
 st.title("💹 India Top 11 Master Terminal")
 header_placeholder = st.empty()
 
-st.header("🚀 Module 1: Strategy Signals")
+st.header("🚀 Module 1: Strategy Signals (Rule-Locked)")
 table_placeholder = st.empty()
 
 st.divider()
 
-st.header("📊 Module 2: Market Pulse (Top Movers)")
-movers_placeholder = st.empty() # THIS PREVENTS DUPLICATION
+st.header("📊 Module 2: Market Pulse (Top Movers with Prices)")
+movers_placeholder = st.empty()
 
 # --- MAIN REFRESH LOOP ---
 while True:
@@ -104,7 +106,7 @@ while True:
         c3.subheader(stat)
         c4.subheader(f"⏱️ {t_rem}")
 
-    # Update Module 1 (Strategy) - Every 60 seconds
+    # Update Module 1 (Strategy)
     if 'last_ref' not in st.session_state or time.time() - st.session_state.last_ref > 60:
         res = []
         for tick, name in STOCKS.items():
@@ -113,28 +115,28 @@ while True:
             res.append({"Script": name, "Price": pr, "Chg %": ch, "Power": "⭐"*sc, "Signal": sig})
         
         df1 = pd.DataFrame(res)
-        
-        # Row coloring logic
-        def style_rows(row):
-            color = 'background-color: rgba(0, 255, 0, 0.1);' if row['Chg %'] > 0 else 'background-color: rgba(255, 0, 0, 0.1);'
-            return [color] * len(row)
-
         with table_placeholder.container():
-            st.dataframe(df1.style.apply(style_rows, axis=1).format({"Chg %": "{:.2f}%"}), use_container_width=True, hide_index=True)
+            st.dataframe(df1.style.format({"Chg %": "{:.2f}%"}), use_container_width=True, hide_index=True)
         st.session_state.last_ref = time.time()
 
-    # Update Module 2 (Movers) - Only if not already displayed or every 10 mins
+    # Update Module 2 (Movers with Prices)
     movers = fetch_market_movers()
     with movers_placeholder.container():
         m1, m2, m3 = st.columns(3)
+        
         with m1:
             st.subheader("🔥 Top 5 Volume")
-            st.table(movers.head(5).index.tolist())
+            top_vol = movers.sort_values(by='Volume', ascending=False).head(5)[['Price', 'Chg%']]
+            st.dataframe(top_vol, use_container_width=True)
+            
         with m2:
             st.subheader("📈 Top 5 Gainers")
-            st.table(movers.sort_values(by='Change %', ascending=False).head(5).index.tolist())
+            top_gain = movers.sort_values(by='Chg%', ascending=False).head(5)[['Price', 'Chg%']]
+            st.dataframe(top_gain.style.background_gradient(subset=['Chg%'], cmap='Greens'), use_container_width=True)
+            
         with m3:
             st.subheader("📉 Top 5 Losers")
-            st.table(movers.sort_values(by='Change %', ascending=True).head(5).index.tolist())
+            top_loss = movers.sort_values(by='Chg%', ascending=True).head(5)[['Price', 'Chg%']]
+            st.dataframe(top_loss.style.background_gradient(subset=['Chg%'], cmap='Reds'), use_container_width=True)
     
     time.sleep(1)
